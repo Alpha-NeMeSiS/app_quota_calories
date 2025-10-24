@@ -13,6 +13,9 @@ export interface GoalParams {
   deficit_or_surplus_pct: number;
   protein_g_per_kg: number;
   fat_g_per_kg_min: number;
+  target_weight_kg?: number;
+  duration_weeks?: number;
+  start_date?: string;
 }
 
 export interface MacroTargets {
@@ -188,4 +191,83 @@ export function getGoalTypeLabel(type: 'loss' | 'maintain' | 'gain'): string {
     case 'gain':
       return 'Prise de masse';
   }
+}
+
+export interface GoalProgress {
+  current_weight: number;
+  target_weight: number;
+  weight_change: number;
+  weight_change_pct: number;
+  weeks_elapsed: number;
+  weeks_remaining: number;
+  weeks_total: number;
+  progress_pct: number;
+  weekly_rate_target: number;
+  weekly_rate_actual?: number;
+  on_track: boolean;
+  estimated_end_date: string;
+}
+
+export function calculateGoalProgress(
+  currentWeight: number,
+  targetWeight: number,
+  durationWeeks: number,
+  startDate: string,
+  goalType: 'loss' | 'gain'
+): GoalProgress {
+  const start = new Date(startDate);
+  const today = new Date();
+
+  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+  const weeksElapsed = Math.max(0, Math.floor((today.getTime() - start.getTime()) / msPerWeek));
+  const weeksRemaining = Math.max(0, durationWeeks - weeksElapsed);
+
+  const totalWeightChange = targetWeight - currentWeight;
+  const weeklyRateTarget = totalWeightChange / durationWeeks;
+
+  const progressPct = Math.min(100, (weeksElapsed / durationWeeks) * 100);
+
+  const expectedWeightChange = weeklyRateTarget * weeksElapsed;
+  const actualWeightChange = currentWeight - currentWeight;
+
+  const onTrack = Math.abs(actualWeightChange - expectedWeightChange) < Math.abs(weeklyRateTarget);
+
+  const estimatedEndDate = new Date(start);
+  estimatedEndDate.setDate(estimatedEndDate.getDate() + durationWeeks * 7);
+
+  return {
+    current_weight: currentWeight,
+    target_weight: targetWeight,
+    weight_change: totalWeightChange,
+    weight_change_pct: (totalWeightChange / currentWeight) * 100,
+    weeks_elapsed: weeksElapsed,
+    weeks_remaining: weeksRemaining,
+    weeks_total: durationWeeks,
+    progress_pct: Math.round(progressPct * 10) / 10,
+    weekly_rate_target: Math.round(weeklyRateTarget * 100) / 100,
+    on_track: onTrack,
+    estimated_end_date: estimatedEndDate.toISOString().split('T')[0],
+  };
+}
+
+export function calculateOptimalDeficitOrSurplus(
+  currentWeight: number,
+  targetWeight: number,
+  durationWeeks: number,
+  tdee: number,
+  goalType: 'loss' | 'gain'
+): number {
+  const totalWeightChange = Math.abs(targetWeight - currentWeight);
+  const weeklyWeightChange = totalWeightChange / durationWeeks;
+
+  const caloriesPerKg = 7700;
+  const weeklyCalorieChange = weeklyWeightChange * caloriesPerKg;
+  const dailyCalorieChange = weeklyCalorieChange / 7;
+
+  const deficitOrSurplusPct = (dailyCalorieChange / tdee) * 100;
+
+  const minPct = 5;
+  const maxPct = goalType === 'loss' ? 25 : 20;
+
+  return Math.max(minPct, Math.min(maxPct, Math.round(deficitOrSurplusPct)));
 }

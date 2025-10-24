@@ -1,17 +1,19 @@
 import { useState, useEffect } from 'react';
 import { Plus, TrendingUp, Calendar } from 'lucide-react';
-import { supabase, DailyTarget, Entry } from '../../lib/supabase';
+import { supabase, DailyTarget, Entry, Goal } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { calculateDailySummary } from '../../utils/calculations';
 import { CalorieRing } from './CalorieRing';
 import { MacroCard } from './MacroCard';
+import { GoalProgressCard } from './GoalProgressCard';
 import { AddEntryModal } from '../Journal/AddEntryModal';
 
 export function Dashboard() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [target, setTarget] = useState<DailyTarget | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [activeGoal, setActiveGoal] = useState<Goal | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -26,7 +28,7 @@ export function Dashboard() {
 
     setLoading(true);
     try {
-      const [targetResult, entriesResult] = await Promise.all([
+      const [targetResult, entriesResult, goalResult] = await Promise.all([
         supabase
           .from('daily_targets')
           .select('*')
@@ -39,13 +41,23 @@ export function Dashboard() {
           .eq('user_id', user.id)
           .eq('date', selectedDate)
           .order('created_at', { ascending: true }),
+        supabase
+          .from('goals')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
       ]);
 
       if (targetResult.error) throw targetResult.error;
       if (entriesResult.error) throw entriesResult.error;
+      if (goalResult.error) throw goalResult.error;
 
       setTarget(targetResult.data);
       setEntries(entriesResult.data || []);
+      setActiveGoal(goalResult.data);
     } catch (error) {
       console.error('Error loading day data:', error);
     } finally {
@@ -130,6 +142,10 @@ export function Dashboard() {
           Ajouter
         </button>
       </div>
+
+      {activeGoal && activeGoal.target_weight_kg && profile && (
+        <GoalProgressCard goal={activeGoal} currentWeight={profile.poids_kg} />
+      )}
 
       <div className="bg-white rounded-lg shadow-md p-6">
         <div className="flex flex-col lg:flex-row items-center gap-8">

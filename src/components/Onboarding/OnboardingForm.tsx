@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { calculateCompleteTargets } from '../../utils/calculations';
+import { calculateCompleteTargets, calculateBMR, calculateTDEE, calculateOptimalDeficitOrSurplus } from '../../utils/calculations';
 
 interface FormData {
   sexe: 'M' | 'F';
@@ -12,6 +12,8 @@ interface FormData {
   activity_level: number;
   goal_type: 'loss' | 'maintain' | 'gain';
   deficit_or_surplus_pct: number;
+  target_weight_kg?: number;
+  duration_weeks?: number;
 }
 
 export function OnboardingForm() {
@@ -29,6 +31,8 @@ export function OnboardingForm() {
     activity_level: 1.55,
     goal_type: 'maintain',
     deficit_or_surplus_pct: 15,
+    target_weight_kg: undefined,
+    duration_weeks: undefined,
   });
 
   const updateFormData = (field: keyof FormData, value: any) => {
@@ -54,6 +58,11 @@ export function OnboardingForm() {
 
       if (profileError) throw profileError;
 
+      const today = new Date().toISOString().split('T')[0];
+      const endDate = formData.duration_weeks
+        ? new Date(new Date().getTime() + formData.duration_weeks * 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        : null;
+
       const { data: goalData, error: goalError } = await supabase
         .from('goals')
         .insert({
@@ -65,6 +74,10 @@ export function OnboardingForm() {
           protein_g_per_kg: 2.0,
           fat_g_per_kg_min: 0.8,
           is_active: true,
+          target_weight_kg: formData.target_weight_kg || null,
+          duration_weeks: formData.duration_weeks || null,
+          start_date: formData.duration_weeks ? today : null,
+          end_date: endDate,
         })
         .select()
         .single();
@@ -88,8 +101,6 @@ export function OnboardingForm() {
           fat_g_per_kg_min: 0.8,
         }
       );
-
-      const today = new Date().toISOString().split('T')[0];
 
       const { error: targetError } = await supabase.from('daily_targets').insert({
         user_id: user.id,
@@ -293,26 +304,125 @@ export function OnboardingForm() {
         </div>
 
         {formData.goal_type !== 'maintain' && (
-          <div>
-            <label htmlFor="deficit_or_surplus_pct" className="block text-sm font-medium text-gray-700 mb-1">
-              {formData.goal_type === 'loss' ? 'Déficit calorique (%)' : 'Surplus calorique (%)'}
-            </label>
-            <input
-              type="number"
-              id="deficit_or_surplus_pct"
-              value={formData.deficit_or_surplus_pct}
-              onChange={(e) => updateFormData('deficit_or_surplus_pct', Number(e.target.value))}
-              min="5"
-              max="30"
-              step="5"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              {formData.goal_type === 'loss'
-                ? 'Recommandé : 10-20% pour une perte durable'
-                : 'Recommandé : 5-15% pour une prise de masse contrôlée'}
-            </p>
-          </div>
+          <>
+            <div className="bg-blue-50 p-4 rounded-md border border-blue-200">
+              <h3 className="text-sm font-semibold text-blue-900 mb-2">Définir une période et un objectif de poids</h3>
+              <p className="text-xs text-blue-700 mb-3">
+                Vous pouvez définir un poids cible et une durée. Le déficit/surplus calorique sera calculé automatiquement.
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="target_weight_kg" className="block text-xs font-medium text-blue-900 mb-1">
+                    Poids cible (kg)
+                  </label>
+                  <input
+                    type="number"
+                    id="target_weight_kg"
+                    value={formData.target_weight_kg || ''}
+                    onChange={(e) => {
+                      const value = e.target.value ? Number(e.target.value) : undefined;
+                      updateFormData('target_weight_kg', value);
+
+                      if (value && formData.duration_weeks) {
+                        const profile = {
+                          sexe: formData.sexe,
+                          date_naissance: formData.date_naissance,
+                          taille_cm: formData.taille_cm,
+                          poids_kg: formData.poids_kg,
+                          body_fat_pct: formData.body_fat_pct,
+                        };
+                        const bmr = calculateBMR(profile, formData.body_fat_pct ? 'katch' : 'mifflin');
+                        const tdee = calculateTDEE(bmr, formData.activity_level);
+                        const optimal = calculateOptimalDeficitOrSurplus(
+                          formData.poids_kg,
+                          value,
+                          formData.duration_weeks,
+                          tdee,
+                          formData.goal_type as 'loss' | 'gain'
+                        );
+                        updateFormData('deficit_or_surplus_pct', optimal);
+                      }
+                    }}
+                    min="30"
+                    max="300"
+                    step="0.1"
+                    placeholder="Ex: 70"
+                    className="w-full px-3 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="duration_weeks" className="block text-xs font-medium text-blue-900 mb-1">
+                    Durée (semaines)
+                  </label>
+                  <input
+                    type="number"
+                    id="duration_weeks"
+                    value={formData.duration_weeks || ''}
+                    onChange={(e) => {
+                      const value = e.target.value ? Number(e.target.value) : undefined;
+                      updateFormData('duration_weeks', value);
+
+                      if (value && formData.target_weight_kg) {
+                        const profile = {
+                          sexe: formData.sexe,
+                          date_naissance: formData.date_naissance,
+                          taille_cm: formData.taille_cm,
+                          poids_kg: formData.poids_kg,
+                          body_fat_pct: formData.body_fat_pct,
+                        };
+                        const bmr = calculateBMR(profile, formData.body_fat_pct ? 'katch' : 'mifflin');
+                        const tdee = calculateTDEE(bmr, formData.activity_level);
+                        const optimal = calculateOptimalDeficitOrSurplus(
+                          formData.poids_kg,
+                          formData.target_weight_kg,
+                          value,
+                          tdee,
+                          formData.goal_type as 'loss' | 'gain'
+                        );
+                        updateFormData('deficit_or_surplus_pct', optimal);
+                      }
+                    }}
+                    min="1"
+                    max="260"
+                    placeholder="Ex: 20"
+                    className="w-full px-3 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {formData.target_weight_kg && formData.duration_weeks && (
+                <div className="mt-3 text-xs text-blue-700">
+                  Changement de poids : {Math.abs(formData.target_weight_kg - formData.poids_kg).toFixed(1)} kg sur {formData.duration_weeks} semaines
+                  ({(Math.abs(formData.target_weight_kg - formData.poids_kg) / formData.duration_weeks).toFixed(2)} kg/semaine)
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor="deficit_or_surplus_pct" className="block text-sm font-medium text-gray-700 mb-1">
+                {formData.goal_type === 'loss' ? 'Déficit calorique (%)' : 'Surplus calorique (%)'}
+              </label>
+              <input
+                type="number"
+                id="deficit_or_surplus_pct"
+                value={formData.deficit_or_surplus_pct}
+                onChange={(e) => updateFormData('deficit_or_surplus_pct', Number(e.target.value))}
+                min="5"
+                max="30"
+                step="5"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                {formData.target_weight_kg && formData.duration_weeks
+                  ? 'Calculé automatiquement selon votre objectif'
+                  : formData.goal_type === 'loss'
+                  ? 'Recommandé : 10-20% pour une perte durable'
+                  : 'Recommandé : 5-15% pour une prise de masse contrôlée'}
+              </p>
+            </div>
+          </>
         )}
 
         <div className="flex gap-4">

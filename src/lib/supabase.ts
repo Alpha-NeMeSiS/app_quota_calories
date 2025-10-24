@@ -31,6 +31,10 @@ export interface Goal {
   protein_g_per_kg: number;
   fat_g_per_kg_min: number;
   is_active: boolean;
+  target_weight_kg?: number;
+  duration_weeks?: number;
+  start_date?: string;
+  end_date?: string;
   created_at: string;
 }
 
